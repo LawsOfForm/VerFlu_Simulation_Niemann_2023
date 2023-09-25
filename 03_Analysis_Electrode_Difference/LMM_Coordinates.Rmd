@@ -1,0 +1,348 @@
+---
+title: "R script for coordinate differences "
+author: Filip Niemann
+date: 20.09.2023
+output: html_document
+---
+
+# load librarys
+```{r}
+library(lattice)
+library(ggplot2)
+library(arrow)
+library(dplyr)
+library(rstatix)
+library(emmeans)
+library(knitr)
+library(lme4)
+library(afex)
+library(tidyr)
+library(sjmisc)
+library(lmerTest)
+library(httpgd)
+library(r2glmm)
+library(see)
+library(patchwork)
+library(gridExtra)
+library(cowplot)
+library(tidyverse)
+library(grid)
+library(here)
+
+# If you use visual code, images will be shown in extra browser window
+hgd()
+hgd_browse()
+```
+
+```{r, echo=FALSE}
+library(rstudioapi)
+source_path <- dirname(getSourceEditorContext()$path)
+# Should be the path on your local machine
+View(source_path)
+# Use given functions to calculate estimated marginal means and plot them
+source(file.path(source_path, "plot_emmip.R"))
+# Path to figure and table files (some are given, some will be created)
+path_source_data <- (file.path(source_path, "Source_Data"))
+```
+
+
+# Variables for tables
+
+```{r}
+# Style and path variables
+digits <- 2
+digits2 <- 4
+path_images <- file.path(source_path, "Images_and_Tables")
+width <- 10
+height <- 7
+dpi <- 150
+fontsize <- 24
+ylab_text <- "Difference (|mm|) \n planned - actual"
+ylab_LMM_text <- "95% CI EMM (|mm|)"
+```
+
+```{r, echo=FALSE}
+# Table for all electrode coordinate values
+data <- file.path(path_source_data, "df_all_diff_abs_Coordinates_long_format.feather")
+df_new <- arrow::read_feather(data)
+View(df_new)
+```
+
+```{r}
+# Delete additional, not used rows in data
+df_new <- df_new[!grepl("konv-tDCS IFG letters", df_new$Exp), ]
+``` 
+
+
+## Change Montage naming
+
+```{r}
+df_new <- within(df_new, rm(Montage))
+df_new <- df_new %>% mutate(Montage = case_when(
+  grepl(pattern = "konv", x = Exp) ~ "conv",
+  grepl(pattern = "focal", x = Exp) ~ "focal")
+)
+```
+
+## Load  df with Session and control same length
+
+```{r, echo=FALSE}
+df_new %>% group_by(Exp, Treatment, Electrode, `coordinate space`) %>% summarise(n())
+```
+
+
+# Choose factor, first factor values dummy coded as 0
+
+```{r}
+df_new$Electrode <- factor(df_new$Electrode, levels = c("y", "z", "x"))
+df_new$Area <- factor(df_new$Area, levels = c("IFG", "M1"))
+df_new$Montage[df_new$Montage == "conv"] <- 'conv'
+df_new$Montage[df_new$Montage == "focal"] <- 'focal'
+df_new$Montage <- factor(df_new$Montage, levels = c("conv", "focal"))
+df_new$Treatment <- factor(df_new$Treatment, levels = c("Stim", "Sham"))
+df_new$Sex[df_new$Sex == "männlich"] <- 'male'
+df_new$Sex[df_new$Sex == "weiblich"] <- 'female'
+df_new$Sex <- factor(df_new$Sex, levels = c("female", "male"))
+df_new$Session <- factor(df_new$Session, levels = c("1", "2"))
+View(df_new)
+```
+
+## Create index for random variable (are similar named in each experiment)
+
+```{r}
+list_nested <- c("Exp", "index")
+lmm_group <- gsub(",", "_", toString(list_nested))
+# "unite" makes copy, therefore new dataset must be specified
+df_new <- unite(
+  data = df_new, lmm_group,
+  list_nested, sep = "-", remove = FALSE
+)
+```
+
+# 2. Generate Models
+
+## Generate LMM, montage in front
+
+
+```{r}
+# Model without interaction effects between electrode position and experimental montages
+lmer_model <- lmer(diff ~ 1 + Sex + Treatment + Session + Electrode + Montage * Area + (1 | lmm_group), data = df_new)
+#summary(lmer_model)
+
+#Model with interaction effects between electrode position and experimental montages
+lmer_model_Area <- lmer(diff ~ 1 + Sex + Treatment + Session + Area * Montage * Electrode + (1 | lmm_group), data = df_new)
+#summary(lmer_model_Area)
+```
+
+## Compare models
+
+```{r}
+# Choose winning model with highest AIC and BIC score
+anova(lmer_model, lmer_model_Area, test = "LRT")
+```
+
+```{r}
+sjPlot::tab_model(lmer_model_Area,, show.ci = 0.95, show.p = TRUE, show.df = TRUE)
+```
+
+# Plot simple effects of the model
+```{r}
+sjPlot::plot_model(lmer_model_Area,
+                   show.values = TRUE,
+                   show.p = TRUE,
+                   title = "Electrode coordinates")
+```
+## Generate Table 2
+```{r}
+sjPlot::tab_model(lmer_model_Area, p.val = "kr", show.df = TRUE)
+```
+
+# generate R² values also shown in Table 2
+
+```{r}
+r2beta(model = lmer_model_Area, partial = TRUE, method = "nsj")
+```
+
+
+# 3. Contrasts and Estimated Marginal Means (EMMs)
+
+## Main effects
+
+### Example plot (not used in paper)
+```{r}
+plot_df <- emmip(lmer_model_Area, ~ Montage, plotit = FALSE, CIs = TRUE)
+emmip_ggplot(plot_df, linearg = list(linetype = "solid"), lwd = 0, dotarg = list( size = 7)) +
+  theme_bw() + 
+  ylab(ylab_LMM_text) +
+  xlab(element_blank()) +
+  theme(text = element_text(family = "DejaVuSans", face = "italic", size = 22)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## EMMs main effects
+
+```{r}
+emm_s.Area_r <- emms_generate(lmer_model_Area, path_images, "Area")
+View(emm_s.Area_r)
+
+emm_s.Montage_r <- emms_generate(lmer_model_Area, path_images, "Montage")
+View(emm_s.Montage_r)
+
+emm_s.Electrode_r <- emms_generate(lmer_model_Area, path_images, "Electrode")
+View(emm_s.Electrode_r)
+```
+
+## Simple effects
+### Example: plot Montage model interaction over Area
+- change factors if needed
+```{r}
+plot_df <- emmip(lmer_model_Area, ~ Montage | Area, plotit = FALSE, CIs = TRUE)
+emmip_ggplot(plot_df, linearg = list(linetype = "solid"), lwd = 0,
+             dotarg = list( size = 7)) +
+             theme_bw() +
+             ylab(ylab_LMM_text) +
+             xlab(element_blank()) +
+theme(text = element_text(family = "DejaVuSans", face = "italic", size = 22)) +
+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Generate EMMs for simple effects
+```{r}
+emm_s.Montage_Electrode_r <- emms_generate(lmer_model_Area, path_images, "Montage", "Electrode")
+View(emm_s.Montage_Electrode_r)
+
+emm_s.Montage_Area_r <- emms_generate(lmer_model_Area, path_images, "Montage", "Area")
+View(emm_s.Montage_Area_r)
+
+emm_s.Area_Electrode_r <- emms_generate(lmer_model_Area, path_images, "Area", "Electrode")
+View(emm_s.Area_Electrode_r)
+
+emm_s.Area_Montage_r <- emms_generate(lmer_model_Area, path_images, "Area", "Montage")
+View(emm_s.Area_Montage_r)
+
+emm_s.Electrode_Area_r <- emms_generate(lmer_model_Area, path_images, "Electrode", "Area")
+View(emm_s.Electrode_Area_r)
+
+emm_s.Electrode_Montage_r <- emms_generate(lmer_model_Area, path_images, "Electrode", "Montage")
+View(emm_s.Electrode_Montage_r)
+```
+
+## SIMPLE CONTRASTS
+
+### plot Montage model interaction over sphere and electrodes
+- example for automatic plotting of interaction
+```{r}
+plot_df <- emmip(lmer_model_Area, ~ Area | Montage * Electrode, plotit = FALSE, CIs = TRUE)
+emmip_ggplot(plot_df, linearg = list(linetype = "solid"), lwd = 0, dotarg = list( size = 3)) +
+  theme_bw() + 
+  ylab(ylab_LMM_text) +
+  xlab(element_blank()) +
+  ylim(0.00, 16) +
+  theme(text = element_text(family = "DejaVuSans", size = 24)) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 1))
+View(plot_df)
+```
+
+### Generate EMMs Estimaged Marginal Means for simple contrasts
+
+```{r}
+emm_s.Montage_Electrode_Area_r <- emms_generate(lmer_model_Area, path_images, "Montage", "Electrode", "Area")
+View(emm_s.Montage_Electrode_Area_r)
+
+emm_s.Montage_Area_Electrode_r <- emms_generate(lmer_model_Area, path_images, "Montage", "Area", "Electrode")
+View(emm_s.Montage_Area_Electrode_r)
+
+emm_s.Area_Electrode_Montage_r <- emms_generate(lmer_model_Area, path_images, "Area", "Electrode", "Montage")
+View(emm_s.Area_Electrode_Montage_r)
+
+emm_s.Electrode_Montage_Area_r <- emms_generate(lmer_model_Area, path_images, "Electrode", "Montage","Area")
+View(emm_s.Electrode_Montage_Area_r)
+
+emm_s.Electrode_Area_Montage_r <- emms_generate(lmer_model_Area, path_images, "Electrode", "Area","Montage")
+View(emm_s.Electrode_Area_Montage_r)
+```
+
+# 4. Plot Contrast and EMMs
+## Main factors
+### Plot Main Factor Montage
+
+```{r}
+plot_posthoc(df_new, emm_s.Montage_r, Montage, "blue")
+ggsave(file.path(path_images,"Interaction_plot_Montage_Electrodes.png"), width = width, height = height, dpi = dpi)
+
+```
+
+### Plot Main Factor Area
+
+```{r}
+plot_posthoc(df_new, emm_s.Area_r, Area, "blue")
+ggsave(file.path(path_images,"Interaction_plot_Area_Electrodes.png"), width = width, height = height, dpi = dpi)
+```
+
+## Plot simple contrasts
+
+### Contrast Montage with interaction of Area and electrode difference
+
+```{r}
+g1 <- plot_posthoc_multi(df_new, emm_s.Montage_Electrode_Area_r, Montage,
+"Area", "IFG", "Electrode", "x",
+"1", "Area", Area, Electrode, "blue")
+
+g2 <- plot_posthoc_multi(df_new, emm_s.Montage_Electrode_Area_r, Montage,
+"Area", "IFG", "Electrode", "y",
+"2", "Area", Area, Electrode, "blue")
+
+g3 <- plot_posthoc_multi(df_new, emm_s.Montage_Electrode_Area_r, Montage,
+"Area", "IFG", "Electrode", "z",
+"3", "Area", Area, Electrode, "blue")
+
+g4 <- plot_posthoc_multi(df_new, emm_s.Montage_Electrode_Area_r, Montage,
+"Area", "M1", "Electrode", "x",
+"4", "", Area, Electrode, "blue")
+
+g5 <- plot_posthoc_multi(df_new, emm_s.Montage_Electrode_Area_r, Montage,
+"Area", "M1", "Electrode", "y",
+"5", "Montage", Area, Electrode, "blue")
+
+g6 <- plot_posthoc_multi(df_new, emm_s.Montage_Electrode_Area_r, Montage,
+"Area", "M1", "Electrode", "z",
+"6", "", Area, Electrode, "blue")
+
+# Combine all simple plots
+g1 + g2 + g3 + g4 + g5 + g6
+ggsave(file.path(path_images,"Interaction_plot_Montage_Electrode_Area.png"), width = height*2, height = width,, dpi = dpi)
+
+```
+
+### Contrast Area with interaction of Montage and electrode difference
+
+```{r}
+b1 <- plot_posthoc_multi(df_new, emm_s.Area_Electrode_Montage_r, Area,
+"Montage", "conv", "Electrode", "x",
+"1", "Area", Montage, Electrode, "blue")
+
+b2 <- plot_posthoc_multi(df_new, emm_s.Area_Electrode_Montage_r, Area,
+"Montage", "conv", "Electrode", "y",
+"2", "Area", Montage, Electrode, "blue")
+
+b3 <- plot_posthoc_multi(df_new, emm_s.Area_Electrode_Montage_r, Area,
+"Montage", "conv", "Electrode", "z",
+"3", "Area", Montage, Electrode, "blue")
+
+b4 <- plot_posthoc_multi(df_new, emm_s.Area_Electrode_Montage_r, Area,
+"Montage", "focal", "Electrode", "x",
+"4", "", Montage, Electrode, "blue")
+
+b5 <- plot_posthoc_multi(df_new, emm_s.Area_Electrode_Montage_r, Area,
+"Montage", "focal", "Electrode", "y",
+"5", "Area", Montage, Electrode, "blue")
+
+b6 <- plot_posthoc_multi(df_new, emm_s.Area_Electrode_Montage_r, Area,
+"Montage", "focal", "Electrode", "z",
+"6", "", Montage, Electrode, "blue")
+
+# Combine all simple plots
+b1 + b2 + b3 + b4 + b5 + b6
+ggsave(file.path(path_images,"Interaction_plot_Area_Electrode_Montage.png"), width = height*2, height = width, dpi = dpi)
+```
+

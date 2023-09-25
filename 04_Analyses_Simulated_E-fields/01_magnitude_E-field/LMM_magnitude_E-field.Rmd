@@ -1,0 +1,458 @@
+---
+title: "R script for SimNIBS simulated magnitude E-field values "
+author: Filip Niemann
+date: 20.09.2023
+output: html_document
+---
+
+```{r}
+library(performance)
+library(lattice)
+library(ggplot2)
+library(arrow)
+library(dplyr)
+library(rstatix)
+library(emmeans)
+library(knitr)
+library(lme4)
+library(afex)
+library(tidyr)
+library(sjmisc)
+library(lmerTest)
+library(httpgd)
+library(r2glmm)
+library(see)
+library(hrbrthemes)
+library(ggpubr)    # For combining graphs but install not workin
+theme_set(theme_pubr())
+library(patchwork)
+library(gridExtra)
+library(cowplot)
+library(grid)
+# If you use visual code, images will be shown in extra browser window
+hgd()
+hgd_browse()
+```
+
+```{r, echo=FALSE}
+library(rstudioapi)
+source_path <- dirname(getSourceEditorContext()$path)
+# Should be the path on your local machine
+View(source_path)
+# Use given functions to calculate estimated marginal means and plot them
+source(file.path(source_path, "plot_emmip.R"))
+# Path to figure and table files (some are given, some will be created)
+path_source_data <- (file.path(source_path, "Source_Data"))
+```
+
+```{r}
+# Style and path variables
+
+options(digits = 5)
+digits <- 2
+digits2 <- 4
+path_images <- file.path(source_path, "Images_and_Tables")
+width <- 8
+height <- 7
+faktor <- 0.7
+dpi <- 150
+fontsize <- 28
+fontsize_2 <- 26
+ylab_text <- "mean magn E in V/m"
+ylab_LMM_text <- "95% CI EMM in V/m"
+```
+
+# 1. Data preparation
+## Read in tables
+- Long format for simulated magnitude E values of actual and planned Electrodposition for each Montage and Area
+```{r}
+#magnitude meanE
+M1_readout_M1_meanE_125 <- "/df_sphere_E_norm_fsaverage_mni_space_12.5_IFG_origin_IFG_M1_origin_M1_readoutrM1.feather"
+M1_readout_M1_meanE_25 <- "/df_sphere_E_norm_fsaverage_mni_space_25_IFG_origin_IFG_M1_origin_M1_readoutrM1.feather"
+#(Optional)
+M1_readout_M1_meanE_375 <- "/df_sphere_E_norm_fsaverage_mni_space_37.5_IFG_origin_IFG_M1_origin_M1_readoutrM1.feather"
+
+
+#Normal component positive part meanE
+
+M1_readout_M1_normal_meanE_125 <- "/df_sphere_E_normal_fsaverage_mni_space_12.5_IFG_origin_IFG_M1_origin_M1_readoutrIFG.feather"
+M1_readout_M1_normal_meanE_25 <- "/df_sphere_E_normal_fsaverage_mni_space_25_IFG_origin_IFG_M1_origin_M1_readoutrM1.feather"
+#(Optional)
+M1_readout_M1_normal_meanE_375 <- "/df_sphere_E_normal_fsaverage_mni_space_37.5_IFG_origin_IFG_M1_origin_M1_readoutrM1.feather"
+
+
+data_meanE_125 <- paste0(path_source_data, M1_readout_M1_meanE_125)
+data_meanE_25 <- paste0(path_source_data, M1_readout_M1_meanE_25)
+#(Optional)
+data_meanE_375 <- paste0(path_source_data, M1_readout_M1_meanE_375)
+
+
+df_meanE_125 <- arrow::read_feather(data_meanE_125)
+df_meanE_25 <- arrow::read_feather(data_meanE_25)
+#(Optional)
+df_meanE_375 <- arrow::read_feather(data_meanE_375)
+```
+## create ROI radius columns
+```{r}
+View(df_meanE_25)
+
+df_meanE_125$sphere <- "1.25"   #d = 2.5 mm
+df_meanE_25$sphere <- "2.5"     #d = 5 mm
+#(optional)
+df_meanE_375$sphere <- "3.75"   #d = 7.5 mm
+```
+
+## Concatenate two data frames with different radii
+```{r}
+df <- rbind(df_meanE_125, df_meanE_25)
+df <- df %>% mutate(Area = case_when(
+    grepl(
+    pattern = "IFG", x = Experiment) ~ "IFG",
+    grepl(
+    pattern = "M1", x = Experiment) ~ "M1")
+    )
+```
+
+```{r}
+# Delete additional not used experimental data
+df <- df[!grepl("IFG \n conv Phon", df$Experiment), ]
+View(df)
+```
+
+## Change Montage naming
+
+```{r}
+df <- within(df, rm(Montage))
+df <- df %>% mutate(Montage = case_when(
+    grepl(
+    pattern = "conv", x = Experiment) ~ "conv",
+    grepl(
+    pattern = "focal", x = Experiment) ~ "focal")
+    )
+```
+
+
+## Create index for random variable (every subject needs)
+
+```{r}
+list_nested <- c("Experiment", "id")
+lmm_group <- gsub(",", "_", toString(list_nested))
+# "unite" makes copy, therefore new dataset must be specified
+df_all <- unite(
+  data = df, lmm_group,
+  list_nested, sep = "-", remove = FALSE
+)
+View(df_all)
+```
+
+## Choose order of factor for linear mixed model
+- first element of factor level will be used as reference model 
+```{r}
+df_all$sphere[df_all$sphere == "1.25"] <- 'r=1.25'
+df_all$sphere[df_all$sphere == "2.5"] <- 'r=2.5'
+df_all$sphere <- factor(df_all$sphere, levels = c("r=1.25", 'r=2.5'))
+df_all$Area <- factor(df_all$Area, levels = c("IFG", "M1"))
+df_all$Montage <- factor(df_all$Montage, levels = c("conv", "focal"))
+df_all$Session <- factor(df_all$Session, levels = c("1", "2"))
+df_all$Treatment <- factor(df_all$Treatment, levels = c("Stim", "Sham"))
+df_all$Sex[df_all$Sex == "männlich"] <- 'male'
+df_all$Sex[df_all$Sex == "weiblich"] <- 'female'
+df_all$Sex <- factor(df_all$Sex, levels = c("female", "male"))
+View(df_all)
+```
+
+## Change level names
+```{r}
+names(df_all)[names(df_all) == 'coordinate space'] <- "coordinatespace"
+df_all$coordinatespace[df_all$coordinatespace == "mni2sub"] <- "planned"
+df_all$coordinatespace[df_all$coordinatespace == "sub"] <- "actual"
+df_all$coordinatespace <- factor(df_all$coordinatespace, levels = c("planned", "actual"))
+
+# Change column name
+names(df_all)[names(df_all) == "mean magnitue E-field V/m"] <- "meanE"
+names(df_all)
+```
+
+# 2. Generate Models
+
+## Generate LMM, montage in front
+
+```{r}
+# check https://cran.r-project.org/web/packages/lme4/vignettes/lmer.pdf for model construction
+# Simplest model with all fixed effects and covariates
+model_Mo_old <- lmer(meanE ~ 1 + Sex + Session + Treatment + Montage * sphere * coordinatespace * Area + (1 | lmm_group), data = df_all)
+#summary(model_Mo_old)
+
+# Correlated random intercept and slope for sphere
+model_Mo_sphere <- lmer(meanE ~ 1 + Sex + Session + Treatment + Montage * sphere * coordinatespace * Area + (sphere | lmm_group), data = df_all)
+#summary(model_Mo)
+
+# Correlated random intercept and slope for electrode position
+model_Mo_coo <- lmer(meanE ~ 1 + Sex + Session + Treatment + Montage * sphere * coordinatespace * Area + (coordinatespace  | lmm_group), data = df_all)
+#summary(model_Mo)
+
+# Correlated random intercept and slope for sphere and electrode position
+model_Mo <- lmer(meanE ~ 1 + Sex + Session + Treatment + Montage * sphere * coordinatespace * Area + (sphere + coordinatespace | lmm_group), data = df_all)
+summary(model_Mo)
+```
+
+## Compare models
+
+```{r}
+# Choose winning model with lowest AIC and BIC
+anova(model_Mo, model_Mo_sphere, model_Mo_coo, model_Mo_old)
+```
+
+
+```{r}
+# Model check
+mo <- performance::check_model(model_Mo, panel = FALSE)
+plot(mo)
+```
+
+## Generate Table 4
+```{r}
+sjPlot::tab_model(model_Mo, p.val = "kr", show.df = TRUE)
+```
+
+# generate R² values also shown in Table 4
+
+```{r}
+r2beta(model = model_Mo, partial = TRUE, method = "kr")
+```
+
+
+# 3. Contrasts and Estimated Marginal Means (EMMs)
+
+## Main effects
+
+### Example plot (not used in paper)
+```{r}
+plot_df_Mo <- emmip(model_Mo, ~ Montage, plotit = FALSE, CIs = TRUE)
+emmip_ggplot(plot_df_Mo, linearg = list(linetype = "solid"), lwd = 0, dotarg = list( size = 7)) +
+  theme_bw() +
+  ylab(ylab_LMM_text) +
+  xlab(element_blank()) +
+  theme(text = element_text(family = "DejaVuSans", face = "italic", size = 22)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## EMMs main effects
+
+```{r}
+emm_s.Montage_r <- emms_generate(model_Mo, path_images, "Montage")
+View(emm_s.Montage_r)
+
+emm_s.Area_r <- emms_generate(model_Mo, path_images, "Area")
+View(emm_s.Area_r)
+
+emm_s.Electrodeposition_r <- emms_generate(model_Mo, path_images, "coordinatespace")
+View(emm_s.Electrodeposition_r)
+
+emm_s.Sphere_r <- emms_generate(model_Mo, path_images, "sphere")
+View(emm_s.Sphere_r)
+```
+
+## Simple effects
+### Example: plot Montage model interaction over sphere
+- Change factors if needed
+```{r}
+plot_df_Mo <- emmip(model_Mo, ~ Montage | sphere, plotit = FALSE, CIs = TRUE)
+emmip_ggplot(plot_df_Mo, linearg = list(linetype = "solid"), lwd = 0,
+                    dotarg = list( size = 7)) +
+                    theme_bw() + 
+                    ylab(ylab_LMM_text) +
+                    xlab(element_blank()) +
+theme(text = element_text(family = "DejaVuSans", face = "italic", size = 22)
+        ) +
+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Generate EMMs for simple effects
+```{r}
+emm_s.Montage_Area_r <- emms_generate(model_Mo, path_images, "Montage", "Area")
+View(emm_s.Montage_Area_r)
+
+emm_s.Montage_Sphere_r <- emms_generate(model_Mo, path_images, "Montage", "sphere")
+View(emm_s.Montage_Sphere_r)
+
+emm_s.Montage_Electrodeposition_r <- emms_generate(model_Mo, path_images, "Montage", "coordinatespace")
+View(emm_s.Montage_Electrodeposition_r)
+
+emm_s.Area_Montage_r <- emms_generate(model_Mo, path_images, "Area", "Montage")
+View(emm_s.Area_Montage_r)
+
+emm_s.Area_Electrodeposition_r <- emms_generate(model_Mo, path_images, "Area", "coordinatespace")
+View(emm_s.Area_Electrodeposition_r)
+
+emm_s.Area_Sphere_r <- emms_generate(model_Mo, path_images, "Area", "sphere")
+View(emm_s.Area_Sphere_r)
+
+emm_s.Sphere_Montage_r <- emms_generate(model_Mo, path_images, "sphere", "Montage")
+View(emm_s.Sphere_Montage_r)
+
+emm_s.Sphere_Area_r <- emms_generate(model_Mo, path_images, "sphere", "Area")
+View(emm_s.Sphere_Area_r)
+
+emm_s.Sphere_Electrodeposition_r <- emms_generate(model_Mo, path_images, "sphere", "coordinatespace")
+View(emm_s.Sphere_Electrodeposition_r)
+
+emm_s.Electrodeposition_Montage_r <- emms_generate(model_Mo, path_images, "coordinatespace", "Montage")
+View(emm_s.Electrodeposition_Montage_r)
+
+emm_s.Electrodeposition_Area_r <- emms_generate(model_Mo, path_images, "coordinatespace", "Area")
+View(emm_s.Electrodeposition_Area_r)
+
+emm_s.Electrodeposition_Sphere_r <- emms_generate(model_Mo, path_images, "coordinatespace", "sphere")
+View(emm_s.Electrodeposition_Sphere_r)
+```
+
+
+## SIMPLE CONTRASTS
+
+### plot Montage model interaction over sphere and electrodes
+- Example for automatic plotting of interaction
+```{r}
+plot_df_Mo <- emmip(model_Mo, ~ Montage | coordinatespace * sphere, plotit = FALSE, CIs = TRUE)
+emmip_ggplot(plot_df_Mo, linearg = list(linetype = "solid"), lwd = 0, dotarg = list( size = 3)) +
+  theme_bw() + 
+  ylab(ylab_LMM_text) +
+  xlab(element_blank()) +
+  ylim(0.06, 0.16) +
+  theme(text = element_text(family = "DejaVuSans", size = 24)) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 1))
+View(plot_df_Mo)
+```
+
+### Generate EMMs Estimaged Marginal Means for simple contrasts
+```{r}
+emm_s.Montage_Electrodeposition_Sphere_r <- emms_generate(model_Mo, path_images, "Montage", "coordinatespace", "sphere")
+View(emm_s.Montage_Electrodeposition_Sphere_r)
+
+emm_s.Electrodeposition_Montage_Area_r <- emms_generate(model_Mo, path_images, "coordinatespace", "Montage", "Area")
+View(emm_s.Electrodeposition_Montage_Area_r)
+
+emm_s.Montage_Sphere_Electrodeposition_r <- emms_generate(model_Mo, path_images,"Montage", "sphere", "coordinatespace")
+View(emm_s.Montage_Sphere_Electrodeposition_r)
+
+emm_s.Sphere_Montage_Electrodeposition_r <- emms_generate(model_Mo, path_images, "sphere", "Montage", "coordinatespace")
+View(emm_s.Sphere_Montage_Electrodeposition_r)
+
+emm_s.Electrodeposition_Montage_Sphere_r <- emms_generate(model_Mo, path_images, "coordinatespace","Montage", "sphere")
+View(emm_s.Electrodeposition_Montage_Sphere_r)
+```
+
+
+## Simple contras all factors
+### Example: plot Montage model interaction over sphere and electrodes
+- Automatic example for simple contrast of all factors
+- Change first factor to change contrast (Example: Montage -> Area)
+```{r}
+plot_df_Mo <- emmip(model_Mo, ~ Montage | coordinatespace * sphere * Area, plotit = FALSE, CIs = TRUE)
+emmip_ggplot(plot_df_Mo, linearg = list(linetype = "solid"), lwd = 0, dotarg = list(size = 7)) +
+  theme_bw() +
+  ylab("95% CI EMM Measurement V/m") +
+  xlab(element_blank()) +
+  ylim(0.00, 0.20) +
+  theme(text = element_text(family = "DejaVuSans", face = "italic", size = 22)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Generate EMMs Estimaged Marginal Means for simple contrasts (all factors)
+```{r}
+emm_s.Montage_Electrodeposition_Sphere_Area_r <- emms_generate(model_Mo, path_images, "Montage", "coordinatespace", "sphere", "Area")
+View(emm_s.Montage_Electrodeposition_Sphere_Area_r)
+
+emm_s.Area_Montage_Electrodeposition_Sphere_r  <- emms_generate(model_Mo, path_images, "Area", "Montage", "coordinatespace", "sphere")
+View(emm_s.Area_Montage_Electrodeposition_Sphere_r)
+
+emm_s.Sphere_Montage_Electrodeposition_Area_r  <- emms_generate(model_Mo, path_images, "sphere", "Montage", "coordinatespace", "Area")
+View(emm_s.Sphere_Montage_Electrodeposition_Area_r)
+
+emm_s.Electrodeposition_Montage_Sphere_Area_r <- emms_generate(model_Mo, path_images, "coordinatespace", "Montage", "sphere", "Area")
+View(emm_s.Electrodeposition_Montage_Sphere_Area_r)
+```
+
+# 4. Plot Contrast and EMMs
+## Main factors
+### Plot Main Factor Montage
+```{r}
+plot_posthoc(df_all, emm_s.Montage_r, Montage, "blue", "Montage")
+ggsave(file.path(path_images,"R_EMM_Montage.png"), width = width*faktor, height = height*faktor, dpi = dpi)
+```
+
+### Plot Main Factor Area
+```{r}
+plot_posthoc(df_all, emm_s.Area_r, Area, "blue", "Area")
+ggsave(file.path(path_images,"R_EMM_Area.png"), width = width*faktor, height = height*faktor, dpi = dpi)
+```
+
+### Plot Main Factor Sphere
+```{r}
+plot_posthoc(df_all, emm_s.Sphere_r, sphere, "blue", "ROI radius in cm")
+ggsave(file.path(path_images,"R_EMM_Sphere.png"), width = width*faktor, height = height*faktor, dpi = dpi)
+```
+
+### Plot Main Factor Electrode position
+```{r}
+plot_posthoc(df_all, emm_s.Electrodeposition_r, coordinatespace, "blue","Electrode position")
+ggsave(file.path(path_images,"R_EMM_Electrode.png"), width = width*faktor, height = height*faktor, dpi = dpi)
+```
+
+## Plot simple contrasts
+
+### Contrast Electrode position with interaction of Montage and ROI radius
+```{r}
+g1 <- plot_posthoc_multi(df_all, emm_s.Electrodeposition_Montage_Sphere_r, coordinatespace,
+"Montage", "conv", "sphere", "r=1.25",
+"1", "Electrode position", Montage, sphere, "blue")
+g2 <- plot_posthoc_multi(df_all, emm_s.Electrodeposition_Montage_Sphere_r, coordinatespace,
+"Montage", "conv", "sphere", "r=2.5",
+"2", "Electrode position", Montage, sphere,"blue")
+g3 <- plot_posthoc_multi(df_all, emm_s.Electrodeposition_Montage_Sphere_r, coordinatespace,
+"Montage", "focal", "sphere", "r=1.25",
+"3", "Electrode position", Montage, sphere,"blue")
+g4 <- plot_posthoc_multi(df_all, emm_s.Electrodeposition_Montage_Sphere_r, coordinatespace,
+"Montage", "focal", "sphere", "r=2.5",
+"4", "Electrode position", Montage, sphere,"blue")
+
+grid_arrange(g1,g2,g3,g4,"Electrode position","R_EMM_Electrodes_Montage_Sphere_color.png")
+```
+
+## Contrast ROI radius with interaction of Montage and Electrode position
+```{r}
+b1 <- plot_posthoc_multi(df_all, emm_s.Sphere_Montage_Electrodeposition_r, sphere,
+"Montage", "conv", "coordinatespace", "planned",
+"1", "ROI radius", Montage, coordinatespace,"blue")
+b2 <- plot_posthoc_multi(df_all, emm_s.Sphere_Montage_Electrodeposition_r, sphere,
+"Montage", "conv", "coordinatespace", "actual",
+"2", "ROI radius", Montage, coordinatespace,"blue")
+b3 <- plot_posthoc_multi(df_all, emm_s.Sphere_Montage_Electrodeposition_r, sphere,
+"Montage", "focal", "coordinatespace", "planned",
+"3", "ROI radius", Montage, coordinatespace,"blue")
+b4 <- plot_posthoc_multi(df_all, emm_s.Sphere_Montage_Electrodeposition_r, sphere,
+"Montage", "focal", "coordinatespace", "actual",
+"4", "ROI radius", Montage, coordinatespace,"blue")
+
+grid_arrange(b1, b2, b3, b4, "ROI radius in cm","R_EMM_Sphere_Montage_Electrodes_color.png")
+
+```
+
+## Contrast Montage with interaction of ROI radius and Electrode position
+```{r}
+c1 <- plot_posthoc_multi(df_all, emm_s.Montage_Sphere_Electrodeposition_r, Montage,
+"sphere", "r=1.25", "coordinatespace", "planned",
+"1", "Montage", coordinatespace, sphere,"blue")
+c2 <- plot_posthoc_multi(df_all, emm_s.Montage_Sphere_Electrodeposition_r, Montage,
+"sphere", "r=2.5", "coordinatespace", "planned",
+"2", "Montage", coordinatespace, sphere,"blue")
+c3 <- plot_posthoc_multi(df_all, emm_s.Montage_Sphere_Electrodeposition_r, Montage,
+"sphere", "r=1.25", "coordinatespace", "actual",
+"3", "Montage", coordinatespace, sphere,"blue")
+c4 <- plot_posthoc_multi(df_all, emm_s.Montage_Sphere_Electrodeposition_r, Montage,
+"sphere", "r=2.5", "coordinatespace", "actual",
+"4", "Montage", coordinatespace, sphere,"blue")
+
+c1 + c2 + c3 + c4
+grid_arrange(c1, c2, c3, c4, "Montage", "R_EMM_Montage_Electrodes_Sphere_color.png")
+```
