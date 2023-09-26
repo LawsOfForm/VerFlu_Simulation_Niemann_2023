@@ -68,6 +68,7 @@ df_new <- arrow::read_feather(data)
 View(df_new)
 ```
 
+
 ```{r}
 # Delete additional, not used rows in data
 df_new <- df_new[!grepl("konv-tDCS IFG letters", df_new$Exp), ]
