@@ -7,7 +7,7 @@ Filip Niemann, Steffen Riemann, Ann-Kathrin Hubert, Daria Antonenko, Axel Thiels
 
 ### Data and Code Availability
 
-The data of this study are available upon reasonable request from the [corresponding author](mailto:filip.niemann@med.uni-greifswald.de). The data are not publicly available due to potential identifying information that could compromise participant privacy. Source data are provided for each script located in the 00_Source_Data folder and can be viewed using the appropriate script (in R the View(df) option)
+ The data are not publicly available due to potential identifying information that could compromise participant privacy. Source data are provided for each script located in the 00_Source_Data folder and can be viewed using the appropriate script (in R the View(df) option)
 
 All analyses were performed using the available toolboxes: [Anaconda 3.2.31](https://anaconda.org/), [Python 3.7.13](https://www.python.org/), [R version 4.3.1](https://www.r-project.org/), [MATLAB R2021b](https://www.mathworks.com), [SPM12](https://www.fil.ion.ucl.ac.uk/spm/software/spm12/), [CONN 20.b](https://web.conn-toolbox.org), [Cat](https://neuro-jena.github.io/cat/), [BrainNetViewer 1.7](https://www.nitrc.org/projects/bnv/), [SimNIBS 3.2.6](https://simnibs.github.io/simnibs/build/html/index.html), [FreeSurfer Version 7.4.1](https://surfer.nmr.mgh.harvard.edu), [FSL 6.0.0](https://fsl.fmrib.ox.ac.uk/fsl/fslwiki/) and [gmsh](https://gmsh.info/) Costumized codes are available within the respository.
 
