@@ -56,3 +56,20 @@ To run the Python and Jupyter Notebook scripts, you need to:
 - Preprocessing of the MRI data, [find details here](01_Preprocessing/README.md)
 - Simulation of the E-fields with SimNIBS, [find details here](02_Simulation/README.md)
 - Note: for [conda environments](https://saturncloud.io/blog/how-to-create-a-conda-environment-based-on-a-yaml-file-a-guide-for-data-scientists/) YAML files (*.yml) are provided containing all neccessary packages for [02_Simulation](02_Simulation/simnibs_env.yml) and Python scripts in th folder for coordinate differences [03_ANalysis_Electrode_Difference](03_Analysis_Electrode_Difference/Get_Figures_S1-S4.yml)
+
+## Focality Analysis
+
+- Focality analysis script and data are provided in "05_Focality_Analysis"
+- data from
+
+##  Comparison neuronavigate and non neuronavigated electrode placement
+
+- Focality analysis script and data are provided in "06_Comparison_Electrode_Placement_Error"
+
+
+
+## 3D printed templates
+- template ideas from Filip Niemann (university medicine greifswald) and Robert Malinowski (university medicine greifswald)
+- in folder "07_3D_print_templates" 3D templates for the spacer an the fillaid are stored
+  - "07_3D_print_templates/Fillaid" contains the printable "Fillaid.stl" and the modifiable "Fillaid.3mf" and "Fillaid.f3d" files.
+  - "07_3D_print_templates/Spacer" contains the printable "Spacer.stl" and the modifiable "Spacer.3mf" and "Spacer.f3d" files.
