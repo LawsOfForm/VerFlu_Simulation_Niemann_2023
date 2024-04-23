@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+
+@Article{pmid38643613,
+   Author="Niemann, F.  and Riemann, S.  and Hubert, A. K.  and Antonenko, D.  and Thielscher, A.  and Martin, A. K.  and Unger, N.  and el, A.  and Meinzer, M. ",
+   Title="Electrode positioning errors reduce current dose for focal tDCS set-ups: Evidence from individualized electric field mapping",
+   Journal="Clin Neurophysiol",
+   Year="2024",
+   Volume="162",
+   Pages="201--209",
+   Month="Apr"
+}
